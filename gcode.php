@@ -141,30 +141,12 @@ $cmdRate = round(($feedRate/$resX)*2/60);
 print(";Speed is $feedRate mm/min, $resX mm/pix => $cmdRate lines/sec\n");
 print(";Power is $laserMin to $laserMax (". round($laserMin/255*100,1) ."%-". round($laserMax/255*100,1) ."%)\n");
 
-//fill up a depthmap 
-//DELETEME
-/*
-$lineIndex=0;
-for($line=$offsetY; $line < ($sizeY+$offsetY); $line+=$scanGap)
-   {
-   $pixelIndex=0;   
-   for($pixel=$offsetX; $pixel<($sizeX+$offsetX); $pixel+=$resX)
-      {      
-      imagecolorat($tmp,$lineIndex,$pixelIndex) = rand(0,65535);
-      //print(imagecolorat($tmp,$lineIndex,$pixelIndex));
-      $pixelIndex++;
-      }
-   $lineIndex++;   
-   }
-$lineIndex--;
-
-
-print(";Verified size iin pixels X=$pixelIndex, Y=$lineIndex\n");*/
 print("G28 X Y\n");
 print("G90\n");
 print("G21\n");
 print("M106 S$laserOff; Turn laser off\n");
 $prevValue = $laserOff; //Clear out the 'previous value' comparison
+$prevX = 0;
 
 //loop through the lines
 $lineIndex=0;
@@ -185,14 +167,27 @@ for($line=$offsetY; $line<($sizeY+$offsetY) && $lineIndex < $pixelsY; $line+=$sc
 
    //if there are no Nonwhite pixels we can just skip this line altogether
    if($lastX < 0 || $firstX < 0) {
-      print(";Line $lineIndex Skipped\n");
+      print("; Line $lineIndex Skipped\n");
       $lineIndex++; //Next line GO!
       continue;
    }
 
-   $pixelIndex=$firstX; //Start at the first nonwhite pixel
-   for($pixel=$offsetX+$firstX*$resX; $pixel < ($sizeX+$offsetX) && $pixelIndex < $pixelsX; $pixel+=$resX) {
-      //abort the loop early if there are no more nonwhite pixels
+   if (abs($offsetX + $firstX*$resX - $prevX) < abs($offsetX + $lastX*$resX - $prevX)) {
+      $pixelIndex = $firstX; //Start at the first nonwhite pixel
+      $lastX++;
+      $direction = 1;
+      $pixel = $offsetX + $pixelIndex * $resX;
+   } else {
+      $pixelIndex = $lastX;
+      $lastX = $firstX-1;
+      $firstX = $pixelIndex;
+      $direction = -1;
+      $pixel = $offsetX + ($pixelIndex + 1) * $resX;
+   }
+
+   while (true) {
+
+      //abort the loop if there are no more nonwhite pixels
       if($pixelIndex == $lastX) {
          if ($overScan == 0) {
             print("M106 S".$prevValue."\n"); //Write out the laser value
@@ -204,7 +199,7 @@ for($line=$offsetY; $line<($sizeY+$offsetY) && $lineIndex < $pixelsY; $line+=$sc
 
       //If this is the first nonwhite pixel we have to move to the correct line, remembering the overscan offset
       if($pixelIndex == $firstX) {            
-         print("G1 X".round($pixel-$overScan,4)." Y".round($line,4)." F$travelRate\n"); //travel quickly to the line start position
+         print("G1 X".round($pixel-$direction*$overScan,4)." Y".round($line,4)." F$travelRate\n"); //travel quickly to the line start position
          print("G1 F$feedRate\n"); //Set travel speed to the right speed for etching
       }
          
@@ -242,7 +237,11 @@ for($line=$offsetY; $line<($sizeY+$offsetY) && $lineIndex < $pixelsY; $line+=$sc
          }
       }
       $prevValue = $value; //Save the laser power for the next loop
-      $pixelIndex++; //Next pixel GO!
+
+      $prevX = round($pixel, 4);
+      $pixel += $resX * $direction;
+
+      $pixelIndex += $direction; //Next pixel GO!
    }
    print("M106 S$laserOff;\n\n"); //Turn off the power for the re-trace
    $prevValue = $laserOff; //Clear out the 'previous value' comparison 
