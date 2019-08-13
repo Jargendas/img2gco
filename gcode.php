@@ -10,28 +10,24 @@
  * @return bool
  * @require PHP 3.0.7 (function_exists), GD1
  */
-function flipMyImage(&$image, $x = 0, $y = 0, $width = null, $height = null)
-{
+function flipMyImage(&$image, $x = 0, $y = 0, $width = null, $height = null) {
     if ($width  < 1) $width  = imagesx($image);
     if ($height < 1) $height = imagesy($image);
     // Truecolor provides better results, if possible.
-    if (function_exists('imageistruecolor') && imageistruecolor($image))
-    {
-        $tmp = imagecreatetruecolor(1, $height);
+    if (function_exists('imageistruecolor') && imageistruecolor($image)) {
+        $tmp = imagecreatetruecolor($width, 1);
+    } else {
+        $tmp = imagecreate($width, 1);
     }
-    else
-    {
-        $tmp = imagecreate(1, $height);
-    }
-    $x2 = $x + $width - 1;
-    for ($i = (int) floor(($width - 1) / 2); $i >= 0; $i--)
-    {
-        // Backup right stripe.
-        imagecopy($tmp,   $image, 0,        0,  $x2 - $i, $y, 1, $height);
-        // Copy left stripe to the right.
-        imagecopy($image, $image, $x2 - $i, $y, $x + $i,  $y, 1, $height);
-        // Copy backuped right stripe to the left.
-        imagecopy($image, $tmp,   $x + $i,  $y, 0,        0,  1, $height);
+
+    $y2 = $y + $height - 1;
+    for ($i = (int) floor(($height - 1) / 2); $i >= 0; $i--) {
+        // Backup bottom stripe.
+        imagecopy($tmp, $image, 0, 0, $x, $y2 - $i, $width, 1);
+        // Copy top stripe to the bottom.
+        imagecopy($image, $image, $x, $y2 - $i, $x, $y + $i, $width, 1);
+        // Copy backuped bottom stripe to the top.
+        imagecopy($image, $tmp, $x, $y + $i, 0, 0, $width, 1);
     }
     imagedestroy($tmp);
     return true;
@@ -58,14 +54,12 @@ set_time_limit(300);
 $now = new DateTime();
 $name = $now->getTimestamp();           // Unix Timestamp -- Since PHP 5.3;
 $ext = "jpg";
-if (isset($_FILES['image']['name']))
-{
+if (isset($_FILES['image']['name'])) {
     $saveto = "$name.$ext";
     //print ";$saveto\n";
     //move_uploaded_file($_FILES['image']['tmp_name'], $saveto);
     $typeok = TRUE;
-    switch($_FILES['image']['type'])
-    {
+    switch($_FILES['image']['type']) {
         //case "image/gif": $src = imagecreatefromgif($saveto); break;
         //case "image/jpeg": // Both regular and progressive jpegs
         //case "image/pjpeg": $src = imagecreatefromjpeg($saveto); break;
@@ -77,8 +71,7 @@ if (isset($_FILES['image']['name']))
         case "image/png": $src = imagecreatefrompng($_FILES['image']['tmp_name']); break;
         default: $typeok = FALSE; break;
     }
-    if ($typeok)
-    { 
+    if ($typeok) { 
        //print ";image OK\n";
        //list($w, $h) = getimagesize($saveto);
        list($w, $h) = getimagesize($_FILES['image']['tmp_name']);
@@ -90,11 +83,10 @@ if (isset($_FILES['image']['name']))
 else
    exit();
 
-if(!isset($_POST['sizeY']) || $_POST['sizeY'] == 0)
-   { 
+if(!isset($_POST['sizeY']) || $_POST['sizeY'] == 0) { 
    print("No image height defined :(\n");
    exit();
-   }
+}
 
 //header('Content-Type: text/plain; charset=utf-8');
 
@@ -124,18 +116,21 @@ $pixelsY = round($sizeY/$scanGap);
 $tmp = imagecreatetruecolor($pixelsX, $pixelsY);
 imagecopyresampled($tmp, $src, 0, 0, 0, 0, $pixelsX, $pixelsY, $w, $h);
 flipMyImage($tmp);
-imagefilter($tmp,IMG_FILTER_GRAYSCALE);
+imagefilter($tmp, IMG_FILTER_GRAYSCALE);
 
-if($_POST['preview'] == 1)
-   {
-   header('Content-Type: image/jpeg'); //do this to display following image
-   imagejpeg($tmp); //show image
+if (isset($_POST['blackAndWhite']))
+   imagefilter($tmp, IMG_FILTER_CONTRAST, -255);
+
+if($_POST['preview'] == 1) {
+   header('Content-Type: image/png'); //do this to display following image
+   imagepng($tmp);
    imagedestroy($tmp);
    imagedestroy($src);        
    exit(); //exit if above
-   }
+}
 
-header("Content-Disposition: attachment; filename=".$_FILES['image']['name'].".gcode");
+header("Content-Type: text/gcode");
+header("Content-Disposition: attachment; filename=".explode(".", $_FILES['image']['name'])[0].".gcode");
 
 print("\n;Created using Nebarnix's IMG2GCO program Ver 1.0\n");
 print(";http://nebarnix.com 2015\n");
@@ -165,74 +160,94 @@ $lineIndex--;
 
 
 print(";Verified size iin pixels X=$pixelIndex, Y=$lineIndex\n");*/
+print("G28 X Y\n");
+print("G90\n");
 print("G21\n");
 print("M106 S$laserOff; Turn laser off\n");
 $prevValue = $laserOff; //Clear out the 'previous value' comparison
-print("G1 F$feedRate\n");
-
-print("G0 X$offsetX Y$offsetY F$travelRate\n"); //travel to start coordinates (upper right of image)
 
 //loop through the lines
 $lineIndex=0;
-for($line=$offsetY; $line<($sizeY+$offsetY) && $lineIndex < $pixelsY; $line+=$scanGap)
-   {  
+for($line=$offsetY; $line<($sizeY+$offsetY) && $lineIndex < $pixelsY; $line+=$scanGap) {  
    //analyze the row and find first and last nonwhite pixels
    $firstX = -1; //initialize to impossible value
    $lastX = -1; //initialize to impossible value
-   for($pixelIndex=0; $pixelIndex < $pixelsX; $pixelIndex++)
-      {
+   for($pixelIndex=0; $pixelIndex < $pixelsX; $pixelIndex++) {
       $rgb = imagecolorat($tmp,$pixelIndex,$lineIndex); //Grab the pixel color
       $value = ($rgb >> 16) & 0xFF; //Convert to 8 bit value
-      if($value < $whiteLevel) //If image data (IE nonwhite)
-         {
+      if($value < $whiteLevel) { //If image data (IE nonwhite)
          if($firstX == -1) //mark this as the first nonwhite pixel
             $firstX = $pixelIndex;
          
          $lastX = $pixelIndex; //Track the last seen nonwhite pixel
-         }
       }
+   }
 
    //if there are no Nonwhite pixels we can just skip this line altogether
-   if($lastX < 0 || $firstX < 0)
-      {
-      print(";Line $lineIndex Skipped $lastX $firstX\n");
+   if($lastX < 0 || $firstX < 0) {
+      print(";Line $lineIndex Skipped\n");
       $lineIndex++; //Next line GO!
       continue;
-      }
+   }
 
    $pixelIndex=$firstX; //Start at the first nonwhite pixel
-   for($pixel=$offsetX+$firstX*$resX; $pixel < ($sizeX+$offsetX) && $pixelIndex < $pixelsX; $pixel+=$resX)
-      {
+   for($pixel=$offsetX+$firstX*$resX; $pixel < ($sizeX+$offsetX) && $pixelIndex < $pixelsX; $pixel+=$resX) {
       //abort the loop early if there are no more nonwhite pixels
-      if($pixelIndex == $lastX)
-         {
+      if($pixelIndex == $lastX) {
+         if ($overScan == 0) {
+            print("M106 S".$prevValue."\n"); //Write out the laser value
+            print("G1 X".round($pixel,4)." F".$feedRate."\n"); //Continue moving
+         }
          print(";Skip The Rest\n");
          break;
-         }
+      }
 
       //If this is the first nonwhite pixel we have to move to the correct line, remembering the overscan offset
-      if($pixelIndex == $firstX)
-         {            
+      if($pixelIndex == $firstX) {            
          print("G1 X".round($pixel-$overScan,4)." Y".round($line,4)." F$travelRate\n"); //travel quickly to the line start position
          print("G1 F$feedRate\n"); //Set travel speed to the right speed for etching
-         print("G1 X".round($pixel,4)." Y".round($line,4)."\n"); //Do move
-         }
-      else
-         print("G1 X".round($pixel,4)."\n"); //Continue moving
+      }
          
+      if ($overScan != 0) {
+         print("G1 X".round($pixel,4)."\n"); //Continue moving
+      }
+
       $rgb = imagecolorat($tmp,$pixelIndex,$lineIndex); //grab the pixel value
       $value = ($rgb >> 16) & 0xFF; //convert pixel to 8bit color
+
+      if (isset($_POST['blackAndWhite'])) {
+         if ($value <= $whiteLevel) {
+            $value = 0;
+         } else {
+            $value = 255;
+         }
+      }
+
       $value = round(map($value,255,0,$laserMin,$laserMax),1); //map 8bit range to our laser range
-       
-      if($value != $prevValue) //Is the laser power different? no need to send the same power again
-         print("M106 S$value\n"); //Write out the laser value
+
+      if($value != $prevValue) { //Is the laser power different? no need to send the same power again
+         if ($overScan == 0) {
+            if ($pixelIndex != $firstX) {
+               print("M106 S".$prevValue."\n"); //Write out the laser value
+            }
+            if ($prevValue == 0) {
+                  if ($pixelIndex != $firstX) {
+                     print("G0 X".round($pixel,4)." F".$travelRate."\n");
+                  }
+            } else {
+                  print("G1 X".round($pixel,4)." F".$feedRate."\n"); //Continue moving
+            }
+         } else {
+            print("M106 S".$value."\n"); //Write out the laser value
+         }
+      }
       $prevValue = $value; //Save the laser power for the next loop
       $pixelIndex++; //Next pixel GO!
-      }
+   }
    print("M106 S$laserOff;\n\n"); //Turn off the power for the re-trace
    $prevValue = $laserOff; //Clear out the 'previous value' comparison 
    $lineIndex++; //Next line GO!
-   }
+}
 $lineIndex--; //Undo one for debugging porpoises
 
 print("M106 S$laserOff ;Turn laser off\n");
